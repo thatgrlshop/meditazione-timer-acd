@@ -1,0 +1,15 @@
+{
+  "name": "Meditazione Timer A.C.D.",
+  "short_name": "Meditazione A.C.D.",
+  "description": "Timer di meditazione multi-fase con suoni rilassanti e pagine personalizzabili.",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#1a1533",
+  "theme_color": "#241b4e",
+  "lang": "it",
+  "icons": [
+    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}
