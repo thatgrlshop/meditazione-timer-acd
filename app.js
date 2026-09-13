@@ -239,6 +239,72 @@ function totalDurationMs(page) {
   return page.phases.reduce((sum, p) => sum + p.seconds * 1000, 0);
 }
 
+/* ---------------- date e calendario ---------------- */
+
+const MONTH_NAMES_IT = ['Gennaio', 'Febbraio', 'Marzo', 'Aprile', 'Maggio', 'Giugno', 'Luglio', 'Agosto', 'Settembre', 'Ottobre', 'Novembre', 'Dicembre'];
+const WEEKDAY_SHORT_IT = ['Lun', 'Mar', 'Mer', 'Gio', 'Ven', 'Sab', 'Dom'];
+const WEEKDAY_LONG_IT = ['Lunedì', 'Martedì', 'Mercoledì', 'Giovedì', 'Venerdì', 'Sabato', 'Domenica'];
+
+function pad2(n) {
+  return String(n).padStart(2, '0');
+}
+
+function dateKey(d) {
+  return d.getFullYear() + '-' + pad2(d.getMonth() + 1) + '-' + pad2(d.getDate());
+}
+
+function todayKey() {
+  return dateKey(new Date());
+}
+
+function parseDateKey(key) {
+  const [y, m, d] = key.split('-').map(Number);
+  return new Date(y, m - 1, d);
+}
+
+/* ---------------- musica: brani di partenza ---------------- */
+
+function defaultMusicTracks() {
+  return [
+    { id: uid('track'), title: '1 Hour Meditation Music — Yellow Brick Cinema', type: 'youtube', embedUrl: 'https://www.youtube-nocookie.com/embed/5PIBMLvcAzc', sourceUrl: 'https://www.youtube.com/watch?v=5PIBMLvcAzc' },
+    { id: uid('track'), title: 'Meditation & Relaxing Music — Yellow Brick Cinema', type: 'youtube', embedUrl: 'https://www.youtube-nocookie.com/embed/LpOwzzQyK70', sourceUrl: 'https://www.youtube.com/watch?v=LpOwzzQyK70' },
+    { id: uid('track'), title: 'Peaceful Meditation (Spotify)', type: 'spotify', embedUrl: 'https://open.spotify.com/embed/playlist/37i9dQZF1DWZqd5JICZI0u', sourceUrl: 'https://open.spotify.com/playlist/37i9dQZF1DWZqd5JICZI0u' },
+    { id: uid('track'), title: 'Deep Sleep (Spotify)', type: 'spotify', embedUrl: 'https://open.spotify.com/embed/playlist/37i9dQZF1DWYcDQ1hSjOpY', sourceUrl: 'https://open.spotify.com/playlist/37i9dQZF1DWYcDQ1hSjOpY' },
+  ];
+}
+
+function parseMusicUrl(url) {
+  let u;
+  try {
+    u = new URL(String(url).trim());
+  } catch (e) {
+    return null;
+  }
+  const host = u.hostname.replace(/^www\./, '');
+  if (host === 'youtube.com' || host === 'm.youtube.com' || host === 'youtu.be' || host === 'music.youtube.com') {
+    let id = null;
+    if (host === 'youtu.be') id = u.pathname.slice(1);
+    else if (u.pathname === '/watch') id = u.searchParams.get('v');
+    else if (u.pathname.startsWith('/embed/')) id = u.pathname.split('/')[2];
+    else if (u.pathname.startsWith('/live/')) id = u.pathname.split('/')[2];
+    if (id) {
+      id = id.split('&')[0].split('?')[0];
+      return { type: 'youtube', embedUrl: `https://www.youtube-nocookie.com/embed/${id}`, sourceUrl: url };
+    }
+  }
+  if (host === 'open.spotify.com') {
+    const parts = u.pathname.split('/').filter(Boolean);
+    if (parts.length >= 2) {
+      const type = parts[parts.length - 2];
+      const id = parts[parts.length - 1];
+      if (['track', 'playlist', 'album', 'episode', 'show', 'artist'].includes(type)) {
+        return { type: 'spotify', embedUrl: `https://open.spotify.com/embed/${type}/${id}`, sourceUrl: url };
+      }
+    }
+  }
+  return null;
+}
+
 /* ---------------- persistenza ---------------- */
 
 function loadState() {
@@ -253,12 +319,16 @@ function loadState() {
       pages: builtinTemplates(),
       settings: { globalSound: 'bell', volume: 0.85 },
       lastPageId: 'home',
+      calendar: {},
+      music: { tracks: defaultMusicTracks() },
     };
   }
   raw.settings = Object.assign({ globalSound: 'bell', volume: 0.85 }, raw.settings || {});
   if (!raw.lastPageId || !raw.pages.some((p) => p.id === raw.lastPageId)) {
     raw.lastPageId = raw.pages[0].id;
   }
+  if (!raw.calendar || typeof raw.calendar !== 'object') raw.calendar = {};
+  if (!raw.music || !Array.isArray(raw.music.tracks)) raw.music = { tracks: defaultMusicTracks() };
   return raw;
 }
 
@@ -273,7 +343,15 @@ function saveState() {
 /* ---------------- stato applicazione ---------------- */
 
 let state = loadState();
-let ui = { view: 'timer', pageId: state.lastPageId, editingPageId: null, editingDraft: null };
+let ui = {
+  view: 'timer',
+  pageId: state.lastPageId,
+  editingPageId: null,
+  editingDraft: null,
+  calendarMonth: { y: new Date().getFullYear(), m: new Date().getMonth() },
+  calendarSelectedDate: todayKey(),
+  musicExpandedId: null,
+};
 
 function idleSession(pageId) {
   return {
@@ -405,6 +483,7 @@ function advancePhase(manual) {
     stopSessionSilently();
     session.status = 'finished';
     renderMain();
+    promptAddToCalendar(page);
     return;
   }
   session.phaseIndex = nextIndex;
@@ -503,6 +582,28 @@ function openNewPageModal() {
   input.addEventListener('keydown', (e) => { if (e.key === 'Enter') create(); });
 }
 
+function promptAddToCalendar(page) {
+  const key = todayKey();
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.innerHTML = `
+    <div class="card modal-card">
+      <h3 class="serif" style="margin-bottom:10px; font-size:22px;">Aggiungere al calendario?</h3>
+      <p style="margin:0 0 4px; font-size:14px; color:var(--ink-soft); line-height:1.5;">Vuoi segnare "${escapeHtml(page.name)}" tra le pratiche di oggi?</p>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-ghost" id="calSkipBtn">No, grazie</button>
+        <button type="button" class="btn btn-primary" id="calYesBtn">Sì, aggiungi</button>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
+  overlay.querySelector('#calSkipBtn').addEventListener('click', () => overlay.remove());
+  overlay.querySelector('#calYesBtn').addEventListener('click', () => {
+    addPracticeToDay(key, page);
+    overlay.remove();
+  });
+}
+
 /* ---------------- navigazione ---------------- */
 
 function selectPage(id) {
@@ -531,6 +632,7 @@ function openEdit(pageId) {
 function confirmDeletePage(pageId) {
   const page = getPage(pageId);
   if (!page) return;
+  if (pageId === 'home') { showToast('La pagina principale non può essere eliminata'); return; }
   showConfirm(`Eliminare la pagina "${page.name}"? L'azione non può essere annullata.`, () => {
     state.pages = state.pages.filter((p) => p.id !== pageId);
     if (state.pages.length === 0) state.pages = builtinTemplates();
@@ -582,7 +684,15 @@ function confirmResetAll() {
     localStorage.removeItem(STORAGE_KEY);
     stopSessionSilently();
     state = loadState();
-    ui = { view: 'timer', pageId: state.pages[0].id, editingPageId: null, editingDraft: null };
+    ui = {
+      view: 'timer',
+      pageId: state.pages[0].id,
+      editingPageId: null,
+      editingDraft: null,
+      calendarMonth: { y: new Date().getFullYear(), m: new Date().getMonth() },
+      calendarSelectedDate: todayKey(),
+      musicExpandedId: null,
+    };
     session = idleSession(ui.pageId);
     renderAll();
     showToast('App ripristinata ai valori predefiniti');
@@ -596,7 +706,7 @@ function renderTabs() {
   wrap.innerHTML = '';
   state.pages.forEach((page) => {
     const btn = document.createElement('button');
-    btn.className = 'page-tab' + (ui.pageId === page.id && ui.view !== 'settings' ? ' active' : '');
+    btn.className = 'page-tab' + (ui.pageId === page.id && (ui.view === 'timer' || ui.view === 'edit') ? ' active' : '');
     btn.textContent = page.name;
     btn.addEventListener('click', () => selectPage(page.id));
     wrap.appendChild(btn);
@@ -858,10 +968,9 @@ function renderEditView() {
       <div class="phase-editor-list" id="phaseEditorList"></div>
       <button type="button" class="btn btn-ghost add-phase-btn" id="addPhaseBtn">+ Aggiungi fase</button>
       <div class="edit-actions">
-        <div>
-          ${draft.builtin
-            ? '<button type="button" class="btn btn-ghost" id="resetPageBtn">Ripristina predefiniti</button>'
-            : '<button type="button" class="btn btn-danger" id="deletePageBtn">Elimina pagina</button>'}
+        <div style="display:flex; gap:10px; flex-wrap:wrap;">
+          ${draft.builtin ? '<button type="button" class="btn btn-ghost" id="resetPageBtn">Ripristina predefiniti</button>' : ''}
+          ${draft.id !== 'home' ? '<button type="button" class="btn btn-danger" id="deletePageBtn">Elimina pagina</button>' : ''}
         </div>
         <button type="button" class="btn btn-primary" id="saveEditBtn">Salva</button>
       </div>
@@ -880,11 +989,10 @@ function renderEditView() {
     renderPhaseEditorList(draft);
   });
   document.getElementById('saveEditBtn').addEventListener('click', saveEditAndClose);
-  if (draft.builtin) {
-    document.getElementById('resetPageBtn').addEventListener('click', () => resetPageToDefault(draft.id));
-  } else {
-    document.getElementById('deletePageBtn').addEventListener('click', () => confirmDeletePage(draft.id));
-  }
+  const resetBtn = document.getElementById('resetPageBtn');
+  if (resetBtn) resetBtn.addEventListener('click', () => resetPageToDefault(draft.id));
+  const deleteBtn = document.getElementById('deletePageBtn');
+  if (deleteBtn) deleteBtn.addEventListener('click', () => confirmDeletePage(draft.id));
 }
 
 /* ---------------- rendering: settings view ---------------- */
@@ -946,11 +1054,330 @@ function renderSettingsView() {
   document.getElementById('resetAllBtn').addEventListener('click', confirmResetAll);
 }
 
+/* ---------------- calendario: dati ---------------- */
+
+function getDayData(key) {
+  return state.calendar[key] || { practices: [], notes: [] };
+}
+
+function ensureDayData(key) {
+  if (!state.calendar[key]) state.calendar[key] = { practices: [], notes: [] };
+  return state.calendar[key];
+}
+
+function addPracticeToDay(key, page) {
+  const day = ensureDayData(key);
+  const entry = day.practices.find((p) => p.pageId === page.id);
+  if (entry) entry.count += 1;
+  else day.practices.push({ id: uid('prac'), pageId: page.id, label: page.name, count: 1 });
+  saveState();
+  renderMain();
+  showToast('Aggiunto al calendario ✓');
+}
+
+function incrementPractice(key, id) {
+  const day = ensureDayData(key);
+  const entry = day.practices.find((p) => p.id === id);
+  if (entry) {
+    entry.count += 1;
+    saveState();
+    renderMain();
+  }
+}
+
+function removePractice(key, id) {
+  const day = ensureDayData(key);
+  day.practices = day.practices.filter((p) => p.id !== id);
+  saveState();
+  renderMain();
+}
+
+function addNoteToDay(key, text) {
+  const day = ensureDayData(key);
+  day.notes.push({ id: uid('note'), text });
+  saveState();
+  renderMain();
+}
+
+function removeNote(key, id) {
+  const day = ensureDayData(key);
+  day.notes = day.notes.filter((n) => n.id !== id);
+  saveState();
+  renderMain();
+}
+
+/* ---------------- rendering: calendario ---------------- */
+
+function renderCalendarView() {
+  const main = document.getElementById('mainView');
+  const { y, m } = ui.calendarMonth;
+  const firstOfMonth = new Date(y, m, 1);
+  const daysInMonth = new Date(y, m + 1, 0).getDate();
+  const jsDay = firstOfMonth.getDay();
+  const leadingBlanks = (jsDay + 6) % 7;
+
+  let cellsHtml = '';
+  for (let i = 0; i < leadingBlanks; i++) cellsHtml += '<div class="cal-day cal-day-empty"></div>';
+  const todK = todayKey();
+  for (let day = 1; day <= daysInMonth; day++) {
+    const key = `${y}-${pad2(m + 1)}-${pad2(day)}`;
+    const data = getDayData(key);
+    const dots = data.practices.slice(0, 4).map((p) => `<span class="dot" style="background:${colorForPhase(p.label)}"></span>`).join('');
+    const cls = ['cal-day'];
+    if (key === todK) cls.push('today');
+    if (key === ui.calendarSelectedDate) cls.push('selected');
+    cellsHtml += `<button type="button" class="${cls.join(' ')}" data-date="${key}">
+      <span class="cal-day-num">${day}</span>
+      ${data.practices.length ? `<span class="dots">${dots}</span>` : ''}
+    </button>`;
+  }
+
+  main.innerHTML = `
+    <div class="card">
+      <div class="section-title">
+        <h2 class="serif">Calendario pratiche</h2>
+        <button class="icon-btn" id="closeCalendarBtn" title="Chiudi">✕</button>
+      </div>
+      <div class="cal-nav">
+        <button type="button" class="mini-btn" id="calPrevBtn" title="Mese precedente">‹</button>
+        <div class="cal-month-label serif">${MONTH_NAMES_IT[m]} ${y}</div>
+        <button type="button" class="mini-btn" id="calNextBtn" title="Mese successivo">›</button>
+      </div>
+      <div class="cal-weekdays">${WEEKDAY_SHORT_IT.map((w) => `<span>${w}</span>`).join('')}</div>
+      <div class="cal-grid">${cellsHtml}</div>
+      <button type="button" class="btn btn-ghost btn-sm" id="calTodayBtn" style="margin-top:14px;">Vai a oggi</button>
+      <hr class="divider" />
+      <div id="calDayDetail"></div>
+    </div>`;
+
+  document.getElementById('closeCalendarBtn').addEventListener('click', () => { ui.view = 'timer'; renderAll(); });
+  document.getElementById('calPrevBtn').addEventListener('click', () => {
+    ui.calendarMonth = m === 0 ? { y: y - 1, m: 11 } : { y, m: m - 1 };
+    renderMain();
+  });
+  document.getElementById('calNextBtn').addEventListener('click', () => {
+    ui.calendarMonth = m === 11 ? { y: y + 1, m: 0 } : { y, m: m + 1 };
+    renderMain();
+  });
+  document.getElementById('calTodayBtn').addEventListener('click', () => {
+    const now = new Date();
+    ui.calendarMonth = { y: now.getFullYear(), m: now.getMonth() };
+    ui.calendarSelectedDate = todayKey();
+    renderMain();
+  });
+  main.querySelectorAll('.cal-day[data-date]').forEach((btn) => {
+    btn.addEventListener('click', () => { ui.calendarSelectedDate = btn.dataset.date; renderMain(); });
+  });
+
+  renderCalDayDetail();
+}
+
+function renderCalDayDetail() {
+  const wrap = document.getElementById('calDayDetail');
+  if (!wrap) return;
+  const key = ui.calendarSelectedDate;
+  const data = getDayData(key);
+  const d = parseDateKey(key);
+  const label = `${WEEKDAY_LONG_IT[(d.getDay() + 6) % 7]} ${d.getDate()} ${MONTH_NAMES_IT[d.getMonth()].toLowerCase()} ${d.getFullYear()}`;
+
+  wrap.innerHTML = `
+    <h3 class="serif" style="font-size:19px; margin-bottom:12px;">${escapeHtml(label)}</h3>
+    <div id="calPracticeList" style="margin-bottom:10px;"></div>
+    <button type="button" class="btn btn-ghost btn-sm" id="calAddPracticeBtn">+ Aggiungi pratica</button>
+    <div id="calPracticePicker"></div>
+    <hr class="divider" />
+    <div id="calNoteList" style="margin-bottom:6px;"></div>
+    <div id="calNoteForm"></div>
+  `;
+
+  renderCalPracticeList(key, data);
+  renderCalNoteList(key, data);
+  renderCalNoteForm(key);
+
+  document.getElementById('calAddPracticeBtn').addEventListener('click', () => togglePracticePicker());
+}
+
+function renderCalPracticeList(key, data) {
+  const wrap = document.getElementById('calPracticeList');
+  if (!wrap) return;
+  if (!data.practices.length) {
+    wrap.innerHTML = '<p class="help-text">Nessuna pratica registrata per questo giorno.</p>';
+    return;
+  }
+  wrap.innerHTML = data.practices.map((p) => `
+    <div class="phase-editor-item" style="padding:10px 14px; margin-bottom:8px;">
+      <div class="phase-editor-row" style="justify-content:space-between; flex-wrap:nowrap;">
+        <div style="display:flex; align-items:center; gap:10px; min-width:0;">
+          <span class="phase-color-dot" style="background:${colorForPhase(p.label)}"></span>
+          <span style="font-weight:700; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${escapeHtml(p.label)}</span>
+          <span class="help-text" style="margin:0; flex:0 0 auto;">× ${p.count}</span>
+        </div>
+        <div style="display:flex; gap:6px; flex:0 0 auto;">
+          <button type="button" class="mini-btn cal-inc-btn" data-id="${p.id}" title="Aggiungi un'altra volta">+</button>
+          <button type="button" class="mini-btn cal-del-practice-btn" data-id="${p.id}" title="Rimuovi">🗑</button>
+        </div>
+      </div>
+    </div>`).join('');
+
+  wrap.querySelectorAll('.cal-inc-btn').forEach((b) => b.addEventListener('click', () => incrementPractice(key, b.dataset.id)));
+  wrap.querySelectorAll('.cal-del-practice-btn').forEach((b) => b.addEventListener('click', () => removePractice(key, b.dataset.id)));
+}
+
+function togglePracticePicker() {
+  const wrap = document.getElementById('calPracticePicker');
+  if (!wrap) return;
+  const key = ui.calendarSelectedDate;
+  if (wrap.dataset.open === '1') {
+    wrap.innerHTML = '';
+    wrap.dataset.open = '0';
+    return;
+  }
+  wrap.dataset.open = '1';
+  wrap.innerHTML = `<div class="phase-pill-row" style="margin-top:10px;">${state.pages.map((p) => `
+    <button type="button" class="phase-pill" data-page-id="${p.id}" style="--pill-color:${colorForPhase(p.name)}">
+      <span class="dot"></span><span class="p-name">${escapeHtml(p.name)}</span>
+    </button>`).join('')}</div>`;
+  wrap.querySelectorAll('[data-page-id]').forEach((btn) => btn.addEventListener('click', () => {
+    const page = getPage(btn.dataset.pageId);
+    if (page) addPracticeToDay(key, page);
+  }));
+}
+
+function renderCalNoteList(key, data) {
+  const wrap = document.getElementById('calNoteList');
+  if (!wrap) return;
+  if (!data.notes.length) { wrap.innerHTML = ''; return; }
+  wrap.innerHTML = data.notes.map((n) => `
+    <div class="sound-row" data-id="${n.id}">
+      <span style="flex:1; font-size:14px;">${escapeHtml(n.text)}</span>
+      <button type="button" class="mini-btn cal-del-note-btn" data-id="${n.id}" title="Rimuovi">🗑</button>
+    </div>`).join('');
+  wrap.querySelectorAll('.cal-del-note-btn').forEach((b) => b.addEventListener('click', () => removeNote(key, b.dataset.id)));
+}
+
+function renderCalNoteForm(key) {
+  const wrap = document.getElementById('calNoteForm');
+  if (!wrap) return;
+  wrap.innerHTML = `
+    <div class="field" style="margin-top:6px;">
+      <label>Aggiungi una nota libera</label>
+      <div style="display:flex; gap:8px;">
+        <input type="text" id="calNoteInput" placeholder="Es. Camminata consapevole 10 minuti" style="flex:1;" />
+        <button type="button" class="btn btn-primary btn-sm" id="calNoteSaveBtn">Aggiungi</button>
+      </div>
+    </div>`;
+  const save = () => {
+    const input = document.getElementById('calNoteInput');
+    const text = input.value.trim();
+    if (!text) return;
+    addNoteToDay(key, text);
+  };
+  document.getElementById('calNoteSaveBtn').addEventListener('click', save);
+  document.getElementById('calNoteInput').addEventListener('keydown', (e) => { if (e.key === 'Enter') save(); });
+}
+
+/* ---------------- musica: azioni ---------------- */
+
+function addMusicTrack(title, url) {
+  const parsed = parseMusicUrl(url);
+  if (!parsed) { showToast('Link non riconosciuto: incolla un link YouTube o Spotify'); return false; }
+  state.music.tracks.push({ id: uid('track'), title: (title || '').trim() || 'Brano senza titolo', type: parsed.type, embedUrl: parsed.embedUrl, sourceUrl: parsed.sourceUrl });
+  saveState();
+  return true;
+}
+
+function removeMusicTrack(id) {
+  state.music.tracks = state.music.tracks.filter((t) => t.id !== id);
+  if (ui.musicExpandedId === id) ui.musicExpandedId = null;
+  saveState();
+  renderMusicList();
+}
+
+/* ---------------- rendering: musica ---------------- */
+
+function renderMusicView() {
+  const main = document.getElementById('mainView');
+  main.innerHTML = `
+    <div class="card">
+      <div class="section-title">
+        <h2 class="serif">Musica per la meditazione</h2>
+        <button class="icon-btn" id="closeMusicBtn" title="Chiudi">✕</button>
+      </div>
+      <p class="help-text">Alcuni brani di partenza (puoi rimuoverli), più i tuoi link YouTube o Spotify preferiti.</p>
+      <div id="musicList" style="margin:16px 0;"></div>
+      <hr class="divider" />
+      <div class="field">
+        <label>Titolo</label>
+        <input type="text" id="musicTitleInput" placeholder="Es. Suoni della foresta" />
+      </div>
+      <div class="field">
+        <label>Link YouTube o Spotify</label>
+        <input type="text" id="musicUrlInput" placeholder="https://youtube.com/watch?v=... oppure https://open.spotify.com/playlist/..." />
+      </div>
+      <button type="button" class="btn btn-primary" id="musicAddBtn">+ Aggiungi brano</button>
+    </div>`;
+
+  renderMusicList();
+
+  document.getElementById('closeMusicBtn').addEventListener('click', () => { ui.view = 'timer'; renderAll(); });
+  document.getElementById('musicAddBtn').addEventListener('click', () => {
+    const titleInput = document.getElementById('musicTitleInput');
+    const urlInput = document.getElementById('musicUrlInput');
+    if (!urlInput.value.trim()) { showToast('Incolla un link YouTube o Spotify'); return; }
+    if (addMusicTrack(titleInput.value, urlInput.value)) {
+      renderMusicList();
+      titleInput.value = '';
+      urlInput.value = '';
+      showToast('Brano aggiunto ✓');
+    }
+  });
+}
+
+function renderMusicList() {
+  const wrap = document.getElementById('musicList');
+  if (!wrap) return;
+  if (!state.music.tracks.length) {
+    wrap.innerHTML = '<div class="empty-state">Nessun brano ancora: aggiungine uno qui sotto.</div>';
+    return;
+  }
+  wrap.innerHTML = state.music.tracks.map((t) => {
+    const isOpen = ui.musicExpandedId === t.id;
+    const icon = t.type === 'youtube' ? '▶️' : '🎧';
+    const isCompact = /\/(track|episode)\//.test(t.embedUrl);
+    const embed = t.type === 'youtube'
+      ? `<div class="embed-16x9"><iframe src="${t.embedUrl}" title="${escapeHtml(t.title)}" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe></div>`
+      : `<div class="embed-spotify"><iframe src="${t.embedUrl}" title="${escapeHtml(t.title)}" height="${isCompact ? 152 : 352}" allow="autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture"></iframe></div>`;
+    return `
+      <div class="phase-editor-item" style="margin-bottom:10px;">
+        <div class="phase-editor-row" style="justify-content:space-between; flex-wrap:nowrap;">
+          <div style="display:flex; align-items:center; gap:10px; min-width:0;">
+            <span class="sound-swatch" style="width:30px;height:30px;font-size:14px;">${icon}</span>
+            <span style="font-weight:700; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${escapeHtml(t.title)}</span>
+          </div>
+          <div style="display:flex; gap:6px; flex:0 0 auto;">
+            <button type="button" class="mini-btn music-toggle-btn" data-id="${t.id}" title="Riproduci">${isOpen ? '▲' : '▶'}</button>
+            <button type="button" class="mini-btn music-del-btn" data-id="${t.id}" title="Rimuovi">🗑</button>
+          </div>
+        </div>
+        ${isOpen ? `<div style="margin-top:12px;">${embed}</div>` : ''}
+      </div>`;
+  }).join('');
+
+  wrap.querySelectorAll('.music-toggle-btn').forEach((b) => b.addEventListener('click', () => {
+    const id = b.dataset.id;
+    ui.musicExpandedId = ui.musicExpandedId === id ? null : id;
+    renderMusicList();
+  }));
+  wrap.querySelectorAll('.music-del-btn').forEach((b) => b.addEventListener('click', () => removeMusicTrack(b.dataset.id)));
+}
+
 /* ---------------- render dispatcher ---------------- */
 
 function renderMain() {
   if (ui.view === 'edit') renderEditView();
   else if (ui.view === 'settings') renderSettingsView();
+  else if (ui.view === 'calendar') renderCalendarView();
+  else if (ui.view === 'music') renderMusicView();
   else renderTimerView();
 }
 
@@ -969,6 +1396,8 @@ function registerServiceWorker() {
 
 document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('settingsBtn').addEventListener('click', () => { ui.view = 'settings'; renderAll(); });
+  document.getElementById('calendarBtn').addEventListener('click', () => { ui.view = 'calendar'; renderAll(); });
+  document.getElementById('musicBtn').addEventListener('click', () => { ui.view = 'music'; renderAll(); });
   renderAll();
   registerServiceWorker();
 });
