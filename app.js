@@ -178,7 +178,7 @@ function builtinTemplates() {
   return [
     {
       id: 'home',
-      name: 'Meditazione Principale',
+      name: 'Meditazione sui Chakra',
       builtin: true,
       phases: [
         ph('Rilassamento', 5 * 60),
@@ -202,7 +202,7 @@ function builtinTemplates() {
     },
     {
       id: 'protezione-casa',
-      name: 'Protezione Personale + Casa',
+      name: 'Protezione',
       builtin: true,
       phases: [
         ph('Rilassamento', 2 * 60),
