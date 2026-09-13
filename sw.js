@@ -1,6 +1,6 @@
 // Service worker minimale: mette in cache i file dell'app per l'uso offline.
 // Ad ogni modifica dei file, incrementare CACHE_VERSION per invalidare la cache precedente.
-const CACHE_VERSION = 'meditazione-acd-v2';
+const CACHE_VERSION = 'meditazione-acd-v3';
 const APP_SHELL = [
   './',
   './index.html',
@@ -8,6 +8,9 @@ const APP_SHELL = [
   './app.js',
   './manifest.webmanifest',
   './icon.svg',
+  './icon-180.png',
+  './icon-192.png',
+  './icon-512.png',
 ];
 
 self.addEventListener('install', (event) => {
