@@ -39,10 +39,11 @@ dispositivo (localStorage).
 
 ## Funzionalità
 
-- **Pagina principale** con la sequenza predefinita: Rilassamento (5
-  min), Chi (7), Plesso (4), Cuore (7), Mente (7), Corona (3), Finale (2).
-- **Pagine aggiuntive predefinite**: "Taglio + Protezione" e "Protezione
-  Personale + Casa", con i valori indicati, tutti modificabili.
+- **Meditazione sui Chakra** (pagina principale) con la sequenza
+  predefinita: Rilassamento (5 min), Chi (7), Plesso (4), Cuore (7),
+  Mente (7), Corona (3), Finale (2).
+- **Pagine aggiuntive predefinite**: "Taglio + Protezione" e
+  "Protezione", con i valori indicati, tutte modificabili.
 - **Crea nuove pagine** a piacere, con un numero qualsiasi di fasi.
 - Ogni fase è completamente modificabile: nome, minuti e secondi, e può
   avere un **suono personalizzato** oppure usare quello generale
