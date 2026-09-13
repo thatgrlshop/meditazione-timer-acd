@@ -1,6 +1,6 @@
 // Service worker minimale: mette in cache i file dell'app per l'uso offline.
 // Ad ogni modifica dei file, incrementare CACHE_VERSION per invalidare la cache precedente.
-const CACHE_VERSION = 'meditazione-acd-v1';
+const CACHE_VERSION = 'meditazione-acd-v2';
 const APP_SHELL = [
   './',
   './index.html',
@@ -26,20 +26,20 @@ self.addEventListener('activate', (event) => {
   self.clients.claim();
 });
 
+// Network-first: prova sempre a scaricare l'ultima versione quando c'è
+// connessione (così un aggiornamento dell'app si vede subito), e usa la
+// cache locale solo come riserva se sei offline.
 self.addEventListener('fetch', (event) => {
   if (event.request.method !== 'GET') return;
   event.respondWith(
-    caches.match(event.request).then((cached) => {
-      const network = fetch(event.request)
-        .then((response) => {
-          if (response && response.ok) {
-            const copy = response.clone();
-            caches.open(CACHE_VERSION).then((cache) => cache.put(event.request, copy));
-          }
-          return response;
-        })
-        .catch(() => cached);
-      return cached || network;
-    })
+    fetch(event.request)
+      .then((response) => {
+        if (response && response.ok) {
+          const copy = response.clone();
+          caches.open(CACHE_VERSION).then((cache) => cache.put(event.request, copy));
+        }
+        return response;
+      })
+      .catch(() => caches.match(event.request))
   );
 });
