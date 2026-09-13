@@ -695,6 +695,7 @@ function confirmResetAll() {
     };
     session = idleSession(ui.pageId);
     renderAll();
+    renderMusicDock();
     showToast('App ripristinata ai valori predefiniti');
   }, 'Ripristina');
 }
@@ -706,8 +707,22 @@ function renderTabs() {
   wrap.innerHTML = '';
   state.pages.forEach((page) => {
     const btn = document.createElement('button');
+    btn.type = 'button';
     btn.className = 'page-tab' + (ui.pageId === page.id && (ui.view === 'timer' || ui.view === 'edit') ? ' active' : '');
-    btn.textContent = page.name;
+    const nameSpan = document.createElement('span');
+    nameSpan.textContent = page.name;
+    btn.appendChild(nameSpan);
+    if (page.id !== 'home') {
+      const delBtn = document.createElement('span');
+      delBtn.className = 'page-tab-del';
+      delBtn.textContent = '✕';
+      delBtn.title = 'Elimina pagina';
+      delBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        confirmDeletePage(page.id);
+      });
+      btn.appendChild(delBtn);
+    }
     btn.addEventListener('click', () => selectPage(page.id));
     wrap.appendChild(btn);
   });
@@ -1288,9 +1303,48 @@ function addMusicTrack(title, url) {
 
 function removeMusicTrack(id) {
   state.music.tracks = state.music.tracks.filter((t) => t.id !== id);
-  if (ui.musicExpandedId === id) ui.musicExpandedId = null;
+  if (ui.musicExpandedId === id) {
+    ui.musicExpandedId = null;
+    renderMusicDock();
+  }
   saveState();
   renderMusicList();
+}
+
+/* ---------------- rendering: mini player persistente ----------------
+   Vive fuori da #mainView, quindi non viene distrutto quando cambi
+   schermata: la musica continua a suonare mentre navighi nell'app. */
+
+function renderMusicDock() {
+  const dock = document.getElementById('musicDock');
+  const app = document.getElementById('app');
+  if (!dock) return;
+  const track = ui.musicExpandedId ? state.music.tracks.find((t) => t.id === ui.musicExpandedId) : null;
+  if (!track) {
+    dock.hidden = true;
+    dock.innerHTML = '';
+    if (app) app.classList.remove('has-music-dock');
+    return;
+  }
+  const icon = track.type === 'youtube' ? '▶️' : '🎧';
+  const playerHtml = track.type === 'youtube'
+    ? `<div class="music-dock-player youtube"><iframe src="${track.embedUrl}" title="${escapeHtml(track.title)}" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe></div>`
+    : `<div class="music-dock-player spotify"><iframe src="${track.embedUrl}" title="${escapeHtml(track.title)}" height="152" allow="autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture"></iframe></div>`;
+
+  dock.hidden = false;
+  dock.innerHTML = `
+    <div class="music-dock-row">
+      <span class="sound-swatch" style="width:28px;height:28px;font-size:13px;">${icon}</span>
+      <span class="music-dock-title">${escapeHtml(track.title)}</span>
+      <button type="button" class="mini-btn" id="musicDockCloseBtn" title="Ferma">✕</button>
+    </div>
+    ${playerHtml}`;
+  document.getElementById('musicDockCloseBtn').addEventListener('click', () => {
+    ui.musicExpandedId = null;
+    renderMusicDock();
+    if (ui.view === 'music') renderMusicList();
+  });
+  if (app) app.classList.add('has-music-dock');
 }
 
 /* ---------------- rendering: musica ---------------- */
@@ -1341,25 +1395,21 @@ function renderMusicList() {
     return;
   }
   wrap.innerHTML = state.music.tracks.map((t) => {
-    const isOpen = ui.musicExpandedId === t.id;
+    const isPlaying = ui.musicExpandedId === t.id;
     const icon = t.type === 'youtube' ? '▶️' : '🎧';
-    const isCompact = /\/(track|episode)\//.test(t.embedUrl);
-    const embed = t.type === 'youtube'
-      ? `<div class="embed-16x9"><iframe src="${t.embedUrl}" title="${escapeHtml(t.title)}" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe></div>`
-      : `<div class="embed-spotify"><iframe src="${t.embedUrl}" title="${escapeHtml(t.title)}" height="${isCompact ? 152 : 352}" allow="autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture"></iframe></div>`;
     return `
-      <div class="phase-editor-item" style="margin-bottom:10px;">
+      <div class="phase-editor-item${isPlaying ? ' playing' : ''}" style="margin-bottom:10px;">
         <div class="phase-editor-row" style="justify-content:space-between; flex-wrap:nowrap;">
           <div style="display:flex; align-items:center; gap:10px; min-width:0;">
             <span class="sound-swatch" style="width:30px;height:30px;font-size:14px;">${icon}</span>
             <span style="font-weight:700; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${escapeHtml(t.title)}</span>
           </div>
           <div style="display:flex; gap:6px; flex:0 0 auto;">
-            <button type="button" class="mini-btn music-toggle-btn" data-id="${t.id}" title="Riproduci">${isOpen ? '▲' : '▶'}</button>
+            <button type="button" class="mini-btn music-toggle-btn" data-id="${t.id}" title="${isPlaying ? 'In riproduzione' : 'Riproduci'}">${isPlaying ? '⏸' : '▶'}</button>
             <button type="button" class="mini-btn music-del-btn" data-id="${t.id}" title="Rimuovi">🗑</button>
           </div>
         </div>
-        ${isOpen ? `<div style="margin-top:12px;">${embed}</div>` : ''}
+        ${isPlaying ? '<p class="help-text" style="margin:8px 0 0;">In riproduzione nel mini player: continua anche cambiando schermata.</p>' : ''}
       </div>`;
   }).join('');
 
@@ -1367,6 +1417,7 @@ function renderMusicList() {
     const id = b.dataset.id;
     ui.musicExpandedId = ui.musicExpandedId === id ? null : id;
     renderMusicList();
+    renderMusicDock();
   }));
   wrap.querySelectorAll('.music-del-btn').forEach((b) => b.addEventListener('click', () => removeMusicTrack(b.dataset.id)));
 }
@@ -1399,5 +1450,6 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('calendarBtn').addEventListener('click', () => { ui.view = 'calendar'; renderAll(); });
   document.getElementById('musicBtn').addEventListener('click', () => { ui.view = 'music'; renderAll(); });
   renderAll();
+  renderMusicDock();
   registerServiceWorker();
 });
