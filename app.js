@@ -214,6 +214,25 @@ function builtinTemplates() {
   ];
 }
 
+// Rinominare una pagina predefinita nel codice (vedi builtinTemplates)
+// non cambia da solo il nome già salvato nel browser di chi la usa da
+// prima: qui si aggiorna automaticamente chi aveva ancora il vecchio
+// nome esatto, senza toccare fasi o suoni personalizzati.
+const LEGACY_PAGE_NAMES = {
+  home: 'Meditazione Principale',
+  'protezione-casa': 'Protezione Personale + Casa',
+};
+
+function migrateLegacyPageNames(pages) {
+  const defaults = builtinTemplates();
+  pages.forEach((p) => {
+    if (LEGACY_PAGE_NAMES[p.id] && p.name === LEGACY_PAGE_NAMES[p.id]) {
+      const def = defaults.find((d) => d.id === p.id);
+      if (def) p.name = def.name;
+    }
+  });
+}
+
 function fmt(ms) {
   const s = Math.max(0, Math.ceil(ms / 1000));
   const m = Math.floor(s / 60);
@@ -327,6 +346,7 @@ function loadState() {
   if (!raw.lastPageId || !raw.pages.some((p) => p.id === raw.lastPageId)) {
     raw.lastPageId = raw.pages[0].id;
   }
+  migrateLegacyPageNames(raw.pages);
   if (!raw.calendar || typeof raw.calendar !== 'object') raw.calendar = {};
   if (!raw.music || !Array.isArray(raw.music.tracks)) raw.music = { tracks: defaultMusicTracks() };
   return raw;
